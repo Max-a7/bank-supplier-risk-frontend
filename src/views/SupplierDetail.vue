@@ -13,17 +13,17 @@
       <el-slider 
         v-model="timeIndex" 
         :min="0" 
-        :max="history.length - 1" 
+        :max="history.length > 0 ? history.length - 1 : 0" 
         :format-tooltip="formatTooltip"
         style="flex: 1; margin: 0 20px;"
       />
       <span class="current-date">
-        📅 {{ history[timeIndex]?.date || '' }}
+        📅 {{ history[timeIndex]?.date || '暂无数据' }}
       </span>
       <el-tag :type="getRiskTagType(history[timeIndex]?.riskLevel)" size="large">
         {{ history[timeIndex]?.riskLevel || '无数据' }}
       </el-tag>
-      <span class="event-desc">{{ history[timeIndex]?.event || '' }}</span>
+      <span class="event-desc">{{ history[timeIndex]?.event || '暂无事件' }}</span>
     </div>
 
     <!-- 供应商基本信息 -->
@@ -38,13 +38,13 @@
         <el-col :span="8">
           <div class="info-item">
             <label>供应商名称：</label>
-            <span>{{ supplierInfo?.name || 'XX科技有限公司' }}</span>
+            <span>{{ supplierInfo?.name || '加载中...' }}</span>
           </div>
         </el-col>
         <el-col :span="8">
           <div class="info-item">
-            <label>统一社会信用代码：</label>
-            <span>{{ supplierInfo?.code || '91440101MA5XXXXXX' }}</span>
+            <label>供应商ID：</label>
+            <span>{{ supplierInfo?.code || '--' }}</span>
           </div>
         </el-col>
         <el-col :span="8">
@@ -81,7 +81,7 @@
     <!-- 5.1 雷达图 -->
     <el-card class="radar-card" shadow="hover">
       <template #header>
-        <span><strong>风险雷达图</strong></span>
+        <span><strong>六维度风险雷达图</strong></span>
         <span style="font-size: 12px; color: #909399; margin-left: 12px;">
           （当前风险等级：{{ currentRiskLevel }}）
         </span>
@@ -128,78 +128,75 @@
 </template>
 
 <script setup>
-import { ref, computed, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
-// 根据文件结构，组件在 src/components/ 下
+// 按实际目录结构导入组件
 import RelationGraph from '@/components/RelationGraph.vue'
-// BaseChart 在 src/charts/ 下
-import BaseChart from '@/charts/BaseChart.vue'
+import BaseChart from '@/components/charts/BaseChart.vue'
+// 引入 API 和 映射函数
+import { getAgentRiskOutput } from '@/api/risk.js'
 
 const route = useRoute()
-const supplierId = ref(route.params.id || 'S001')
+const supplierId = ref(route.params.id || 'S-REC198')
 
-// ========== 5.3 时间轴相关 ==========
+// ================= 核心数据流 =================
+const report = ref({})
+
+// 时序数据：从证据链动态生成
+const history = computed(() => {
+  const items = report.value?.evidence_chain?.evidence_items || []
+  if (items.length === 0) return []
+  return items
+    .sort((a, b) => (a.event_week || 0) - (b.event_week || 0))
+    .map(item => ({
+      date: `第 ${item.event_week} 周`,
+      riskLevel: item.event_severity >= 4 ? '高' : item.event_severity >= 3 ? '中' : '低',
+      event: `[${item.event_category}] ${item.event_subtype}（严重度：${item.event_severity}）`
+    }))
+})
+
+// 供应商基本信息（从 report 动态生成）
+const supplierInfo = computed(() => ({
+  name: report.value?.supplier_name || '加载中...',
+  code: report.value?.supplier_id || '--',
+  contact: '张经理',
+  phone: '138****1234',
+  status: '合作中'
+}))
+
+// 当前风险等级
+const currentRiskLevel = computed(() => {
+  const levelMap = { 'HIGH': '高', 'MEDIUM': '中', 'LOW': '低' }
+  return levelMap[report.value?.risk_level] || '低'
+})
+
+// ================= 5.3 时间轴相关 =================
 const timeIndex = ref(0)
 const playing = ref(false)
 let intervalId = null
 
-// 模拟历史数据（实际应该从API获取）
-const history = ref([
-  { date: '2024-01-15', riskLevel: '低', event: '✅ 合同签署正常，项目启动' },
-  { date: '2024-03-20', riskLevel: '低', event: '✅ 首期款支付完成，进度正常' },
-  { date: '2024-06-10', riskLevel: '中', event: '⚠️ 交付延期预警，需关注' },
-  { date: '2024-08-25', riskLevel: '中', event: '⚠️ 质量抽检不合格，整改中' },
-  { date: '2024-10-30', riskLevel: '高', event: '🚨 核心系统故障，紧急处理' },
-  { date: '2024-12-05', riskLevel: '高', event: '🚨 合同违约风险，法律介入' }
-])
+const formatTooltip = (val) => history.value[val]?.date || ''
 
-// 当前风险等级
-const currentRiskLevel = computed(() => {
-  return history.value[timeIndex.value]?.riskLevel || '低'
-})
-
-// 格式化时间轴提示
-const formatTooltip = (val) => {
-  return history.value[val]?.date || ''
-}
-
-// 获取风险等级对应的标签类型
 const getRiskTagType = (level) => {
-  const map = {
-    '低': 'success',
-    '中': 'warning',
-    '高': 'danger'
-  }
+  const map = { '低': 'success', '中': 'warning', '高': 'danger' }
   return map[level] || 'info'
 }
 
-// 获取项目状态对应的标签类型
 const getProjectStatusType = (status) => {
-  const map = {
-    '进行中': 'warning',
-    '已完成': 'success',
-    '已暂停': 'danger',
-    '待启动': 'info'
-  }
+  const map = { '进行中': 'warning', '已完成': 'success', '已暂停': 'danger', '待启动': 'info' }
   return map[status] || 'info'
 }
 
-// 播放风险演变
 const playRiskEvolution = () => {
-  if (playing.value) {
-    ElMessage.warning('正在播放中，请稍候...')
+  if (playing.value) return
+  if (history.value.length === 0) {
+    ElMessage.warning('暂无风险事件可播放')
     return
   }
-  
   timeIndex.value = 0
   playing.value = true
-  
-  // 清除之前的定时器
-  if (intervalId) {
-    clearInterval(intervalId)
-    intervalId = null
-  }
+  if (intervalId) clearInterval(intervalId)
   
   intervalId = setInterval(() => {
     if (timeIndex.value < history.value.length - 1) {
@@ -210,114 +207,74 @@ const playRiskEvolution = () => {
       playing.value = false
       ElMessage.success('风险演变演示完成！')
     }
-  }, 1500) // 每1.5秒切换一次
+  }, 1500)
 }
 
-// ========== 5.1 雷达图数据 ==========
-const getRadarDataByTime = (index) => {
-  const level = history.value[index]?.riskLevel || '低'
-  switch(level) {
-    case '低': return [25, 20, 18, 30, 28]
-    case '中': return [55, 48, 52, 42, 50]
-    case '高': return [82, 68, 88, 58, 75]
-    default: return [25, 20, 18, 30, 28]
+// ================= 雷达图（六维度动态计算） =================
+const radarOption = computed(() => {
+  const dimensions = ['履约', '人员', '安全', '经营', '舆情', '合规']
+  const evidenceItems = report.value?.evidence_chain?.evidence_items || []
+
+  // 聚合每个维度的严重度总分
+  const radarData = dimensions.map(dim => {
+    const items = evidenceItems.filter(e => e.event_category === dim)
+    return items.reduce((sum, e) => sum + (e.event_severity || 0), 0)
+  })
+
+  return {
+    tooltip: { trigger: 'item' },
+    radar: {
+      indicator: dimensions.map(dim => ({ name: dim, max: 10 })),
+      shape: 'polygon',
+      splitNumber: 4,
+      axisName: { color: '#333', fontSize: 13 },
+      splitArea: {
+        areaStyle: { color: ['rgba(64, 158, 255, 0.02)', 'rgba(64, 158, 255, 0.06)'] }
+      },
+      axisLine: { lineStyle: { color: 'rgba(64, 158, 255, 0.2)' } }
+    },
+    series: [{
+      type: 'radar',
+      data: [{
+        value: radarData,
+        name: '风险严重度',
+        areaStyle: { color: 'rgba(64, 158, 255, 0.3)' },
+        lineStyle: { color: '#409EFF', width: 2 },
+        itemStyle: { color: '#409EFF' }
+      }],
+      symbol: 'circle',
+      symbolSize: 6
+    }]
   }
-}
-
-const radarOption = computed(() => ({
-  tooltip: {
-    trigger: 'item'
-  },
-  radar: {
-    indicator: [
-      { name: '交付能力', max: 100 },
-      { name: '质量管控', max: 100 },
-      { name: '风险控制', max: 100 },
-      { name: '合规性', max: 100 },
-      { name: '合作稳定性', max: 100 }
-    ],
-    shape: 'polygon',
-    splitNumber: 4,
-    axisName: {
-      color: '#333',
-      fontSize: 13
-    },
-    splitArea: {
-      areaStyle: {
-        color: ['rgba(64, 158, 255, 0.02)', 'rgba(64, 158, 255, 0.06)']
-      }
-    },
-    axisLine: {
-      lineStyle: {
-        color: 'rgba(64, 158, 255, 0.2)'
-      }
-    }
-  },
-  series: [{
-    type: 'radar',
-    data: [{
-      value: getRadarDataByTime(timeIndex.value),
-      name: '风险评分',
-      areaStyle: {
-        color: 'rgba(64, 158, 255, 0.3)'
-      },
-      lineStyle: {
-        color: '#409EFF',
-        width: 2
-      },
-      itemStyle: {
-        color: '#409EFF'
-      }
-    }],
-    symbol: 'circle',
-    symbolSize: 6
-  }]
-}))
-
-// ========== 供应商数据 ==========
-// 供应商基本信息
-const supplierInfo = ref({
-  name: 'XX科技有限公司',
-  code: '91440101MA5XXXXXX',
-  contact: '张经理',
-  phone: '138****1234',
-  status: '合作中'
 })
 
-// 供应商项目数据
+// ================= 关联项目（暂时保留静态数据） =================
 const supplierProjects = ref([
-  { 
-    id: 1, 
-    name: '网银重构项目', 
-    status: '进行中',
-    amount: '¥1,200,000',
-    startDate: '2024-01-15'
-  },
-  { 
-    id: 2, 
-    name: '核心支付系统升级', 
-    status: '已完成',
-    amount: '¥2,800,000',
-    startDate: '2023-06-01'
-  },
-  { 
-    id: 3, 
-    name: '手机银行开发', 
-    status: '进行中',
-    amount: '¥950,000',
-    startDate: '2024-03-20'
-  },
-  { 
-    id: 4, 
-    name: '数据中台建设项目', 
-    status: '待启动',
-    amount: '¥3,500,000',
-    startDate: '2025-01-01'
-  }
+  { id: 1, name: '网银重构项目', status: '进行中', amount: '¥1,200,000', startDate: '2024-01-15' },
+  { id: 2, name: '核心支付系统升级', status: '已完成', amount: '¥2,800,000', startDate: '2023-06-01' },
+  { id: 3, name: '手机银行开发', status: '进行中', amount: '¥950,000', startDate: '2024-03-20' },
+  { id: 4, name: '数据中台建设项目', status: '待启动', amount: '¥3,500,000', startDate: '2025-01-01' }
 ])
 
-// ========== 生命周期 ==========
-// 组件卸载时清除定时器
+// ================= 生命周期 =================
+const fetchDetail = async () => {
+  const data = await getAgentRiskOutput(supplierId.value)
+  report.value = data || {}
+  timeIndex.value = 0
+}
+
+onMounted(() => {
+  fetchDetail()
+})
+
+// 监听路由参数变化（比如从列表页跳到详情页不同供应商）
+watch(() => route.params.id, (newId) => {
+  if (newId) {
+    supplierId.value = newId
+    fetchDetail()
+  }
+})
+
 onUnmounted(() => {
   if (intervalId) {
     clearInterval(intervalId)

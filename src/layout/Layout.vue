@@ -13,16 +13,16 @@
         active-text-color="#ffffff"
       >
         <el-menu-item index="/dashboard">
-          <el-icon><Odometer /></el-icon>
-          <span>风险驾驶舱</span>
+          <el-icon><Odometer /></el-icon><span>风险驾驶舱</span>
         </el-menu-item>
         <el-menu-item index="/suppliers">
-          <el-icon><OfficeBuilding /></el-icon>
-          <span>供应商风险列表</span>
+          <el-icon><OfficeBuilding /></el-icon><span>供应商风险列表</span>
+        </el-menu-item>
+        <el-menu-item index="/agent-trace">
+          <el-icon><Connection /></el-icon><span>Agent研判</span>
         </el-menu-item>
         <el-menu-item index="/disposal">
-          <el-icon><CircleCheck /></el-icon>
-          <span>风险处置中心</span>
+          <el-icon><CircleCheck /></el-icon><span>风险处置中心</span>
         </el-menu-item>
       </el-menu>
     </el-aside>
@@ -47,10 +47,12 @@
 .layout-container {
   height: 100vh;
 }
+
 .layout-aside {
   background-color: #001529;
   overflow-x: hidden;
 }
+
 .logo {
   height: 60px;
   display: flex;
@@ -61,6 +63,33 @@
   font-size: 15px;
   background: #002140;
 }
+
+/* ========== 菜单项强制对齐核心样式 ========== */
+:deep(.el-menu-item) {
+  display: flex !important;
+  align-items: center !important;
+  height: 56px !important;
+  padding-left: 20px !important; /* 统一左侧内边距，让所有图标起点对齐 */
+}
+
+/* 图标固定宽度、不压缩、水平居中 */
+:deep(.el-menu-item .el-icon) {
+  flex-shrink: 0 !important; /* 防止图标被挤压 */
+  width: 24px !important;
+  margin-right: 12px !important;
+  text-align: center;
+  font-size: 18px;
+}
+
+/* 文字自适应内容，不加 flex:1，避免被空白字符放大 */
+:deep(.el-menu-item span) {
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* ========================================= */
+
 .layout-header {
   display: flex;
   align-items: center;
@@ -69,11 +98,13 @@
   border-bottom: 1px solid #e4e7ed;
   box-shadow: 0 1px 4px rgba(0, 21, 41, 0.08);
 }
+
 .header-title {
   font-size: 18px;
   font-weight: 600;
   color: #303133;
 }
+
 .layout-main {
   background: #f0f2f5;
   padding: 20px;

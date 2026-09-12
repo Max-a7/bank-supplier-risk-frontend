@@ -1,33 +1,32 @@
 <template>
   <div>
     <!-- 统计卡片 -->
-    <el-row :gutter="20">
-      <el-col :span="6">
-        <el-card shadow="hover" class="stat-card">
-          <div class="stat-title">供应商总数</div>
-          <div class="stat-value">128</div>
-        </el-card>
-      </el-col>
-      <el-col :span="6">
-        <el-card shadow="hover" class="stat-card">
-          <div class="stat-title">高风险数量</div>
-          <!-- 后期动态绑定：countHighRisk -->
-          <div class="stat-value text-danger">7</div>
-        </el-card>
-      </el-col>
-      <el-col :span="6">
-        <el-card shadow="hover" class="stat-card">
-          <div class="stat-title">本月新增风险</div>
-          <div class="stat-value text-warning">23</div>
-        </el-card>
-      </el-col>
-      <el-col :span="6">
-        <el-card shadow="hover" class="stat-card">
-          <div class="stat-title">待处置风险</div>
-          <div class="stat-value text-danger">5</div>
-        </el-card>
-      </el-col>
-    </el-row>
+<el-row :gutter="20">
+  <el-col :span="6">
+    <el-card shadow="hover" class="stat-card">
+      <div class="stat-title">供应商总数</div>
+      <div class="stat-value">{{ totalSuppliers }}</div>
+    </el-card>
+  </el-col>
+  <el-col :span="6">
+    <el-card shadow="hover" class="stat-card">
+      <div class="stat-title">高风险数量</div>
+      <div class="stat-value text-danger">{{ highRiskCount }}</div>
+    </el-card>
+  </el-col>
+  <el-col :span="6">
+    <el-card shadow="hover" class="stat-card">
+      <div class="stat-title">风险上升数量</div>
+      <div class="stat-value text-warning">{{ recentRiskCount }}</div>
+    </el-card>
+  </el-col>
+  <el-col :span="6">
+    <el-card shadow="hover" class="stat-card">
+      <div class="stat-title">待处置风险</div>
+      <div class="stat-value text-danger">{{ pendingDisposalCount }}</div>
+    </el-card>
+  </el-col>
+</el-row>
 
     <!-- 图表区域 -->
     <el-row :gutter="20" class="mt-20">
@@ -78,8 +77,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-// 引入 API 和 映射函数
-import { getSupplierRiskList } from '@/api/risk.js' 
+import { getSupplierRiskList } from '@/api/risk.js'
 import { getRiskLevelColor, getRiskLevelText, getRiskTrendText } from '@/utils/mapping.js'
 import BaseChart from '@/components/charts/BaseChart.vue'
 
@@ -87,43 +85,57 @@ const suppliers = ref([])
 const trendOption = ref({})
 const categoryOption = ref({})
 
+// 动态计算统计卡片
+const totalSuppliers = computed(() => suppliers.value.length)
+const highRiskCount = computed(() => suppliers.value.filter(s => s.risk_level === 'HIGH').length)
+const recentRiskCount = computed(() => suppliers.value.filter(s => s.risk_trend?.trend_type === 'RISING').length)
+const pendingDisposalCount = computed(() => suppliers.value.length) // 暂时无法区分，先统一算
+
+// Top 风险供应商（按风险分降序）
 const topSuppliers = computed(() =>
   [...suppliers.value].sort((a, b) => b.risk_score - a.risk_score).slice(0, 5)
 )
 
-// 加载数据的函数（空实现，只留接口）
 const fetchDashboardData = async () => {
-  // 目前这里不跑数据，等 Mock 数据交付后解开注释即可
-  // const res = await getSupplierRiskList()
-  // suppliers.value = res.data
-  
-  // 现在可以通过这里的逻辑来编写静态图表，测试 BaseChart 是否正常工作
+  // 1. 获取列表数据
+  const list = await getSupplierRiskList()
+  suppliers.value = list
+
+  // 2. 动态生成趋势折线图（以供应商名称为 X 轴，风险分为 Y 轴）
   trendOption.value = {
-    xAxis: { type: 'category', data: ['4月', '5月', '6月'] },
-    yAxis: { type: 'value', max: 100 },
+    tooltip: { trigger: 'axis' },
+    grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
+    xAxis: { type: 'category', data: list.map(i => i.name) },
+    yAxis: { type: 'value', name: '风险分' },
     series: [
       {
         type: 'line',
-        data: [32, 45, 58],
+        data: list.map(i => i.risk_score),
         smooth: true,
-        areaStyle: {},
+        areaStyle: { color: 'rgba(64, 158, 255, 0.2)' },
         itemStyle: { color: '#409EFF' }
       }
     ]
   }
+
+  // 3. 动态生成风险类别分布饼图（统计 risk_drive_factors 里的因素）
+  const factorCount = {}
+  list.forEach(item => {
+    if (item.risk_drive_factors) {
+      item.risk_drive_factors.forEach(f => {
+        factorCount[f] = (factorCount[f] || 0) + 1
+      })
+    }
+  })
+  const pieData = Object.keys(factorCount).map(key => ({ value: factorCount[key], name: key }))
+
   categoryOption.value = {
     tooltip: { trigger: 'item' },
     series: [
       {
         type: 'pie',
         radius: ['40%', '70%'],
-        data: [
-          { value: 8, name: '人员风险' },
-          { value: 5, name: '履约风险' },
-          { value: 4, name: '项目风险' },
-          { value: 3, name: '舆情风险' },
-          { value: 2, name: '合规风险' }
-        ]
+        data: pieData.length > 0 ? pieData : [{ value: 1, name: '暂无数据' }]
       }
     ]
   }

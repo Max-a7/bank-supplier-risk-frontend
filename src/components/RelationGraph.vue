@@ -18,7 +18,7 @@
 <script setup>
 import { computed } from 'vue'
 // BaseChart 在 charts 目录下
-import BaseChart from '@/charts/BaseChart.vue'
+import BaseChart from '@/components/charts/BaseChart.vue'
 
 const props = defineProps({
   supplierId: {

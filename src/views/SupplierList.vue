@@ -1,102 +1,108 @@
+<!-- src/views/SupplierList.vue -->
 <template>
-  <div class="page-container">
-    <el-row :gutter="16" class="filter-bar">
-      <el-col :span="6">
-        <el-input v-model="searchName" placeholder="按供应商名称搜索" clearable />
-      </el-col>
-      <el-col :span="4">
-        <el-select v-model="filterLevel" placeholder="风险等级" clearable>
-          <el-option label="高" value="高" />
-          <el-option label="中" value="中" />
-          <el-option label="低" value="低" />
-        </el-select>
-      </el-col>
-      <el-col :span="4">
-        <el-button type="primary" @click="resetFilters">重置</el-button>
-      </el-col>
-    </el-row>
+  <div>
+    <!-- 搜索栏 -->
+    <el-card shadow="hover" class="mb-20">
+      <el-row :gutter="20" align="middle">
+        <el-col :span="8">
+          <el-input 
+            v-model="searchKeyword" 
+            placeholder="按供应商名称搜索" 
+            clearable 
+            prefix-icon="Search"
+          />
+        </el-col>
+        <el-col :span="6">
+          <el-select v-model="filterLevel" placeholder="风险等级" clearable style="width: 100%;">
+            <el-option label="高风险" value="HIGH" />
+            <el-option label="中风险" value="MEDIUM" />
+            <el-option label="低风险" value="LOW" />
+          </el-select>
+        </el-col>
+        <el-col :span="4">
+          <el-button type="primary" @click="resetFilter">重置</el-button>
+        </el-col>
+      </el-row>
+    </el-card>
 
-    <el-table :data="filteredSuppliers" stripe @row-click="goDetail">
-      <el-table-column prop="name" label="供应商名称" min-width="200" />
-      <el-table-column prop="type" label="类型" width="140" />
-      <el-table-column prop="level" label="重要程度" width="140" />
-      <el-table-column prop="riskScore" label="综合风险分" width="130" sortable>
-        <template #default="{ row }">
-          <span :class="scoreClass(row.riskScore)">{{ row.riskScore }}</span>
-        </template>
-      </el-table-column>
-      <el-table-column prop="riskLevel" label="风险等级" width="100">
-        <template #default="{ row }">
-          <el-tag :type="levelTagType(row.riskLevel)">{{ row.riskLevel }}</el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column prop="riskTrend" label="趋势" width="100">
-        <template #default="{ row }">
-          <el-icon v-if="row.riskTrend === '上升'" color="#f56c6c"><Top /></el-icon>
-          <el-icon v-else-if="row.riskTrend === '下降'" color="#67c23a"><Bottom /></el-icon>
-          <span v-else>平稳</span>
-        </template>
-      </el-table-column>
-      <el-table-column prop="mainRiskSources" label="主要风险来源" min-width="200">
-        <template #default="{ row }">
-          <el-tag v-for="src in row.mainRiskSources" :key="src" size="small" class="mr-5">
-            {{ src }}
-          </el-tag>
-        </template>
-      </el-table-column>
-    </el-table>
+    <!-- 列表表格 -->
+    <el-card shadow="hover">
+      <el-table :data="filteredSuppliers" stripe style="width: 100%">
+        <el-table-column prop="name" label="供应商名称" min-width="180" />
+        <el-table-column prop="supplier_id" label="供应商ID" width="150" />
+        <el-table-column prop="risk_level" label="风险等级" width="120">
+          <template #default="{ row }">
+            <el-tag :type="getRiskLevelColor(row.risk_level)">
+              {{ getRiskLevelText(row.risk_level) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="risk_score" label="综合风险分" width="120" sortable />
+        <el-table-column prop="risk_trend.trend_type" label="趋势" width="120">
+          <template #default="{ row }">
+            {{ getRiskTrendText(row.risk_trend?.trend_type) }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="risk_drive_factors" label="主要风险来源" min-width="200">
+          <template #default="{ row }">
+            <el-tag v-for="src in row.risk_drive_factors" :key="src" size="small" class="mr-5">
+              {{ src }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="120" fixed="right">
+          <template #default="{ row }">
+            <el-button 
+              link 
+              type="primary" 
+              size="small" 
+              @click="$router.push(`/suppliers/${row.supplier_id}`)"
+            >
+              查看详情
+            </el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-card>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
-import { mockApi } from '@/api/mockData'
+import { getSupplierRiskList } from '@/api/risk.js'
+import { getRiskLevelColor, getRiskLevelText, getRiskTrendText } from '@/utils/mapping.js'
 
-const router = useRouter()
 const suppliers = ref([])
-const searchName = ref('')
+const searchKeyword = ref('')
 const filterLevel = ref('')
 
+// 根据搜索关键词和风险等级过滤
 const filteredSuppliers = computed(() => {
-  return suppliers.value.filter((s) => {
-    const matchName = !searchName.value || s.name.includes(searchName.value)
-    const matchLevel = !filterLevel.value || s.riskLevel === filterLevel.value
-    return matchName && matchLevel
+  return suppliers.value.filter(item => {
+    const matchKeyword = !searchKeyword.value || item.name?.includes(searchKeyword.value)
+    const matchLevel = !filterLevel.value || item.risk_level === filterLevel.value
+    return matchKeyword && matchLevel
   })
 })
 
-const resetFilters = () => {
-  searchName.value = ''
+const resetFilter = () => {
+  searchKeyword.value = ''
   filterLevel.value = ''
 }
 
-const goDetail = (row) => {
-  router.push(`/suppliers/${row.id}`)
+const fetchList = async () => {
+  console.log('【前端】开始获取供应商列表...')
+  const list = await getSupplierRiskList()
+  suppliers.value = list
+  console.log('【前端】获取到数据条数:', list.length)
 }
 
-const levelTagType = (level) => {
-  if (level === '高') return 'danger'
-  if (level === '中') return 'warning'
-  return 'success'
-}
-
-const scoreClass = (score) => {
-  if (score >= 70) return 'text-danger'
-  if (score >= 40) return 'text-warning'
-  return 'text-success'
-}
-
-onMounted(async () => {
-  suppliers.value = await mockApi.getSuppliers()
+onMounted(() => {
+  fetchList()
 })
 </script>
 
 <style scoped>
-.filter-bar {
-  margin-bottom: 20px;
-}
-.mr-5 {
-  margin-right: 5px;
-}
+.mb-20 { margin-bottom: 20px; }
+.mr-5 { margin-right: 5px; }
 </style>
