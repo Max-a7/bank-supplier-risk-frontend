@@ -1,25 +1,19 @@
 <!-- src/views/SupplierDetail.vue -->
 <template>
   <div class="supplier-detail">
-    <!-- 5.3 时间轴演示控制（放在顶部） -->
+    <!-- 时间轴演示控制 -->
     <div class="demo-control">
-      <el-button 
-        type="primary" 
-        @click="playRiskEvolution"
-        :disabled="playing"
-      >
+      <el-button type="primary" @click="playRiskEvolution" :disabled="playing">
         {{ playing ? '播放中...' : '▶ 播放风险演变' }}
       </el-button>
-      <el-slider 
-        v-model="timeIndex" 
-        :min="0" 
-        :max="history.length > 0 ? history.length - 1 : 0" 
+      <el-slider
+        v-model="timeIndex"
+        :min="0"
+        :max="history.length > 0 ? history.length - 1 : 0"
         :format-tooltip="formatTooltip"
         style="flex: 1; margin: 0 20px;"
       />
-      <span class="current-date">
-        📅 {{ history[timeIndex]?.date || '暂无数据' }}
-      </span>
+      <span class="current-date">📅 {{ history[timeIndex]?.date || '暂无数据' }}</span>
       <el-tag :type="getRiskTagType(history[timeIndex]?.riskLevel)" size="large">
         {{ history[timeIndex]?.riskLevel || '无数据' }}
       </el-tag>
@@ -31,54 +25,52 @@
       <template #header>
         <div class="card-header">
           <span><strong>供应商基本信息</strong></span>
-          <el-tag type="primary" size="large">{{ supplierInfo?.status || '合作中' }}</el-tag>
+          <el-tag type="primary" size="large">{{ supplierInfo.status }}</el-tag>
         </div>
       </template>
       <el-row :gutter="20">
         <el-col :span="8">
           <div class="info-item">
             <label>供应商名称：</label>
-            <span>{{ supplierInfo?.name || '加载中...' }}</span>
+            <span>{{ supplierInfo.name }}</span>
           </div>
         </el-col>
         <el-col :span="8">
           <div class="info-item">
             <label>供应商ID：</label>
-            <span>{{ supplierInfo?.code || '--' }}</span>
+            <span>{{ supplierInfo.code }}</span>
           </div>
         </el-col>
         <el-col :span="8">
           <div class="info-item">
             <label>联系人：</label>
-            <span>{{ supplierInfo?.contact || '张经理' }}</span>
+            <span>{{ supplierInfo.contact }}</span>
           </div>
         </el-col>
         <el-col :span="8">
           <div class="info-item">
             <label>联系电话：</label>
-            <span>{{ supplierInfo?.phone || '138****1234' }}</span>
+            <span>{{ supplierInfo.phone }}</span>
           </div>
         </el-col>
         <el-col :span="8">
           <div class="info-item">
             <label>合作状态：</label>
-            <el-tag :type="supplierInfo?.status === '合作中' ? 'success' : 'danger'">
-              {{ supplierInfo?.status || '合作中' }}
-            </el-tag>
+            <el-tag type="success">{{ supplierInfo.status }}</el-tag>
           </div>
         </el-col>
         <el-col :span="8">
           <div class="info-item">
             <label>风险等级：</label>
             <el-tag :type="getRiskTagType(currentRiskLevel)">
-              {{ currentRiskLevel || '低' }}
+              {{ currentRiskLevel }}
             </el-tag>
           </div>
         </el-col>
       </el-row>
     </el-card>
 
-    <!-- 5.1 雷达图 -->
+    <!-- 六维度雷达图 -->
     <el-card class="radar-card" shadow="hover">
       <template #header>
         <span><strong>六维度风险雷达图</strong></span>
@@ -89,21 +81,15 @@
       <BaseChart :option="radarOption" height="350px" />
     </el-card>
 
-    <!-- 5.2 关系图 - 放在关联项目卡片旁边 -->
+    <!-- 关系图 -->
     <div class="project-section">
-      <!-- 两列布局：左侧项目卡片，右侧关系图 -->
       <div class="project-cards-wrapper">
-        <!-- 左侧：关联项目卡片 -->
         <el-card class="project-cards" shadow="hover">
           <template #header>
             <span><strong>关联项目（{{ supplierProjects.length }}个）</strong></span>
           </template>
           <div class="project-list">
-            <div 
-              v-for="project in supplierProjects" 
-              :key="project.id" 
-              class="project-item"
-            >
+            <div v-for="project in supplierProjects" :key="project.id" class="project-item">
               <div class="project-info">
                 <span class="project-name">{{ project.name }}</span>
                 <el-tag :type="getProjectStatusType(project.status)" size="small">
@@ -111,14 +97,13 @@
                 </el-tag>
               </div>
               <div class="project-meta">
-                <span>合同金额：{{ project.amount || '--' }}</span>
-                <span>开始日期：{{ project.startDate || '--' }}</span>
+                <span>合同金额：{{ project.amount }}</span>
+                <span>开始日期：{{ project.startDate }}</span>
               </div>
             </div>
           </div>
         </el-card>
 
-        <!-- 右侧：关系图组件 -->
         <div class="relation-graph-wrapper">
           <RelationGraph :supplier-id="supplierId" />
         </div>
@@ -131,21 +116,24 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
-// 按实际目录结构导入组件
+import axios from 'axios'
 import RelationGraph from '@/components/RelationGraph.vue'
 import BaseChart from '@/components/charts/BaseChart.vue'
-// 引入 API 和 映射函数
 import { getAgentRiskOutput } from '@/api/risk.js'
 
 const route = useRoute()
 const supplierId = ref(route.params.id || 'S-REC198')
 
-// ================= 核心数据流 =================
+// ================= 核心数据 =================
 const report = ref({})
+const supplierName = ref('加载中...')  // 独立的供应商名称状态
 
-// 时序数据：从证据链动态生成
+// ⭐ 判断字符串是否像 ID（兼容普通连字符 - 和特殊连字符 ‑）
+const isLikeId = (str) => /^S[-‑]/.test(String(str || ''))
+
+// 时序数据：从 evidence_summary 动态生成
 const history = computed(() => {
-  const items = report.value?.evidence_chain?.evidence_items || []
+  const items = report.value?.evidence_summary || []
   if (items.length === 0) return []
   return items
     .sort((a, b) => (a.event_week || 0) - (b.event_week || 0))
@@ -156,10 +144,10 @@ const history = computed(() => {
     }))
 })
 
-// 供应商基本信息（从 report 动态生成）
+// 供应商基本信息
 const supplierInfo = computed(() => ({
-  name: report.value?.supplier_name || '加载中...',
-  code: report.value?.supplier_id || '--',
+  name: supplierName.value,
+  code: report.value?.supplier_id || report.value?.supplier_profile?.supplier_id || '--',
   contact: '张经理',
   phone: '138****1234',
   status: '合作中'
@@ -167,11 +155,12 @@ const supplierInfo = computed(() => ({
 
 // 当前风险等级
 const currentRiskLevel = computed(() => {
-  const levelMap = { 'HIGH': '高', 'MEDIUM': '中', 'LOW': '低' }
-  return levelMap[report.value?.risk_level] || '低'
+  const level = report.value?.risk_grade?.risk_level
+  const map = { 'RED': '高', 'YELLOW': '中', 'GREEN': '低' }
+  return map[level] || '低'
 })
 
-// ================= 5.3 时间轴相关 =================
+// ================= 时间轴 =================
 const timeIndex = ref(0)
 const playing = ref(false)
 let intervalId = null
@@ -197,7 +186,7 @@ const playRiskEvolution = () => {
   timeIndex.value = 0
   playing.value = true
   if (intervalId) clearInterval(intervalId)
-  
+
   intervalId = setInterval(() => {
     if (timeIndex.value < history.value.length - 1) {
       timeIndex.value++
@@ -210,24 +199,23 @@ const playRiskEvolution = () => {
   }, 1500)
 }
 
-// ================= 雷达图（六维度动态计算） =================
+// ================= 雷达图 =================
 const radarOption = computed(() => {
-  const dimensions = ['履约', '人员', '安全', '经营', '舆情', '合规']
-  const evidenceItems = report.value?.evidence_chain?.evidence_items || []
+  const dimensions = ['公司背景', '司法', '失信', '经营风险', '经营状况', '知识产权']
+  const breakdown = report.value?.dimension_breakdown || []
 
-  // 聚合每个维度的严重度总分
   const radarData = dimensions.map(dim => {
-    const items = evidenceItems.filter(e => e.event_category === dim)
-    return items.reduce((sum, e) => sum + (e.event_severity || 0), 0)
+    const item = breakdown.find(b => b.dimension === dim)
+    return item?.score || 0
   })
 
   return {
     tooltip: { trigger: 'item' },
     radar: {
-      indicator: dimensions.map(dim => ({ name: dim, max: 10 })),
+      indicator: dimensions.map(dim => ({ name: dim, max: 3 })),
       shape: 'polygon',
       splitNumber: 4,
-      axisName: { color: '#333', fontSize: 13 },
+      axisName: { color: '#333', fontSize: 12 },
       splitArea: {
         areaStyle: { color: ['rgba(64, 158, 255, 0.02)', 'rgba(64, 158, 255, 0.06)'] }
       },
@@ -237,7 +225,7 @@ const radarOption = computed(() => {
       type: 'radar',
       data: [{
         value: radarData,
-        name: '风险严重度',
+        name: '风险评分',
         areaStyle: { color: 'rgba(64, 158, 255, 0.3)' },
         lineStyle: { color: '#409EFF', width: 2 },
         itemStyle: { color: '#409EFF' }
@@ -248,7 +236,7 @@ const radarOption = computed(() => {
   }
 })
 
-// ================= 关联项目（暂时保留静态数据） =================
+// ================= 关联项目（静态） =================
 const supplierProjects = ref([
   { id: 1, name: '网银重构项目', status: '进行中', amount: '¥1,200,000', startDate: '2024-01-15' },
   { id: 2, name: '核心支付系统升级', status: '已完成', amount: '¥2,800,000', startDate: '2023-06-01' },
@@ -258,19 +246,47 @@ const supplierProjects = ref([
 
 // ================= 生命周期 =================
 const fetchDetail = async () => {
+  console.log('【前端】开始 fetchDetail:', supplierId.value)
+
+  // 1. 先拿报告
   const data = await getAgentRiskOutput(supplierId.value)
   report.value = data || {}
   timeIndex.value = 0
+
+  // 2. 先尝试用 report 里的名字
+  let name = data?.supplier_name
+  console.log('【前端】report.supplier_name =', name)
+
+  // 3. 如果名字缺失或以 S- / S‑ 开头，就主动去数据库接口拿
+  if (!name || isLikeId(name)) {
+    try {
+      console.log('【前端】尝试从数据库获取名称:', supplierId.value)
+      const res = await axios.get(`/api/backend/suppliers/${supplierId.value}`)
+      console.log('【前端】/backend/suppliers 返回:', res.data)
+
+      const dbSupplier = res.data?.data || res.data
+      if (dbSupplier?.supplier_name && !isLikeId(dbSupplier.supplier_name)) {
+        name = dbSupplier.supplier_name
+        console.log('【前端】兜底获取名称成功:', name)
+      }
+    } catch (e) {
+      console.error('【前端】兜底获取名称失败:', e)
+    }
+  }
+
+  // 4. 最终覆盖
+  supplierName.value = name || supplierId.value
+  console.log('【前端】最终展示名称:', supplierName.value)
 }
 
 onMounted(() => {
   fetchDetail()
 })
 
-// 监听路由参数变化（比如从列表页跳到详情页不同供应商）
 watch(() => route.params.id, (newId) => {
   if (newId) {
     supplierId.value = newId
+    supplierName.value = '加载中...'
     fetchDetail()
   }
 })
@@ -292,7 +308,6 @@ onUnmounted(() => {
   min-height: 100vh;
 }
 
-/* ========== 5.3 时间轴控制样式 ========== */
 .demo-control {
   display: flex;
   align-items: center;
@@ -319,7 +334,6 @@ onUnmounted(() => {
   min-width: 150px;
 }
 
-/* ========== 卡片通用样式 ========== */
 .supplier-info-card,
 .radar-card,
 .project-cards {
@@ -333,7 +347,6 @@ onUnmounted(() => {
   align-items: center;
 }
 
-/* ========== 供应商信息 ========== */
 .info-item {
   padding: 8px 0;
   font-size: 14px;
@@ -350,7 +363,6 @@ onUnmounted(() => {
   color: #303133;
 }
 
-/* ========== 5.2 关系图布局 ========== */
 .project-section {
   margin-top: 0;
 }
@@ -420,7 +432,6 @@ onUnmounted(() => {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
 }
 
-/* ========== 滚动条美化 ========== */
 .project-list::-webkit-scrollbar {
   width: 4px;
 }
@@ -434,12 +445,10 @@ onUnmounted(() => {
   background: #f5f7fa;
 }
 
-/* ========== 响应式调整 ========== */
 @media (max-width: 1200px) {
   .project-cards-wrapper {
     grid-template-columns: 1fr;
   }
-  
   .project-list {
     max-height: 300px;
   }
@@ -450,15 +459,12 @@ onUnmounted(() => {
     flex-direction: column;
     align-items: stretch;
   }
-  
   .demo-control .el-button {
     width: 100%;
   }
-  
   .event-desc {
     text-align: center;
   }
-  
   .supplier-detail {
     padding: 12px;
   }
