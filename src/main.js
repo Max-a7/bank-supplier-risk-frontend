@@ -1,20 +1,23 @@
+/// src/main.js
 import { createApp } from 'vue'
 import App from './App.vue'
 import router from './router'
-import pinia from './stores'
 import ElementPlus from 'element-plus'
 import 'element-plus/dist/index.css'
 import * as ElementPlusIconsVue from '@element-plus/icons-vue'
-import './styles/main.scss'
+import { mockLogin } from '@/api/risk.js'
 
 const app = createApp(App)
 
-// 注册所有 Element Plus 图标
 for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
   app.component(key, component)
 }
 
-app.use(pinia)
 app.use(router)
 app.use(ElementPlus)
-app.mount('#app')
+
+// ⭐ 先 Mock 登录，拿到 X-User-Id，再挂载应用
+mockLogin('demo_leadership').then(() => {
+  console.log('【Main】Mock 登录完成，X-User-Id =', localStorage.getItem('X-User-Id'))
+  app.mount('#app')
+})

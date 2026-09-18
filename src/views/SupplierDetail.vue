@@ -1,4 +1,5 @@
 <!-- src/views/SupplierDetail.vue -->
+<!-- src/views/SupplierDetail.vue -->
 <template>
   <div class="supplier-detail">
     <!-- 时间轴演示控制 -->
@@ -116,7 +117,6 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import axios from 'axios'
 import RelationGraph from '@/components/RelationGraph.vue'
 import BaseChart from '@/components/charts/BaseChart.vue'
 import { getAgentRiskOutput } from '@/api/risk.js'
@@ -127,9 +127,6 @@ const supplierId = ref(route.params.id || 'S-REC198')
 // ================= 核心数据 =================
 const report = ref({})
 const supplierName = ref('加载中...')  // 独立的供应商名称状态
-
-// ⭐ 判断字符串是否像 ID（兼容普通连字符 - 和特殊连字符 ‑）
-const isLikeId = (str) => /^S[-‑]/.test(String(str || ''))
 
 // 时序数据：从 evidence_summary 动态生成
 const history = computed(() => {
@@ -247,36 +244,11 @@ const supplierProjects = ref([
 // ================= 生命周期 =================
 const fetchDetail = async () => {
   console.log('【前端】开始 fetchDetail:', supplierId.value)
-
-  // 1. 先拿报告
   const data = await getAgentRiskOutput(supplierId.value)
   report.value = data || {}
+  supplierName.value = data?.supplier_name || data?.supplier_profile?.supplier_name || supplierId.value
+  console.log('【前端】最终供应商名称:', supplierName.value)
   timeIndex.value = 0
-
-  // 2. 先尝试用 report 里的名字
-  let name = data?.supplier_name
-  console.log('【前端】report.supplier_name =', name)
-
-  // 3. 如果名字缺失或以 S- / S‑ 开头，就主动去数据库接口拿
-  if (!name || isLikeId(name)) {
-    try {
-      console.log('【前端】尝试从数据库获取名称:', supplierId.value)
-      const res = await axios.get(`/api/backend/suppliers/${supplierId.value}`)
-      console.log('【前端】/backend/suppliers 返回:', res.data)
-
-      const dbSupplier = res.data?.data || res.data
-      if (dbSupplier?.supplier_name && !isLikeId(dbSupplier.supplier_name)) {
-        name = dbSupplier.supplier_name
-        console.log('【前端】兜底获取名称成功:', name)
-      }
-    } catch (e) {
-      console.error('【前端】兜底获取名称失败:', e)
-    }
-  }
-
-  // 4. 最终覆盖
-  supplierName.value = name || supplierId.value
-  console.log('【前端】最终展示名称:', supplierName.value)
 }
 
 onMounted(() => {

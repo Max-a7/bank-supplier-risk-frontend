@@ -14,9 +14,9 @@
         </el-col>
         <el-col :span="6">
           <el-select v-model="filterLevel" placeholder="风险等级" clearable style="width: 100%;">
-            <el-option label="高风险" value="HIGH" />
-            <el-option label="中风险" value="MEDIUM" />
-            <el-option label="低风险" value="LOW" />
+            <el-option label="高风险" value="RED" />
+            <el-option label="中风险" value="YELLOW" />
+            <el-option label="低风险" value="GREEN" />
           </el-select>
         </el-col>
         <el-col :span="4">
