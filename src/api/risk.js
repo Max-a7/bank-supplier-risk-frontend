@@ -7,7 +7,6 @@ const request = axios.create({
   timeout: 30000
 })
 
-// ⭐ 请求拦截器：携带 X-User-Id
 request.interceptors.request.use(
   (config) => {
     const userId = localStorage.getItem('X-User-Id')
@@ -19,7 +18,6 @@ request.interceptors.request.use(
   (error) => Promise.reject(error)
 )
 
-// 响应拦截器
 request.interceptors.response.use(
   (response) => {
     const res = response.data
@@ -32,6 +30,7 @@ request.interceptors.response.use(
   (error) => Promise.reject(error)
 )
 
+// ⭐ ID 归一化：把特殊连字符 U+2011 等转成普通 -
 const normalizeId = (str) => String(str || '').replace(/[\u2010-\u2015\u2212]/g, '-')
 
 // ================== Mock 登录 ==================
@@ -51,12 +50,7 @@ export const mockLogin = async (username = 'demo_leadership') => {
   }
 }
 
-// ================== ⭐ 新增：Dashboard Summary ==================
-/**
- * 获取 Dashboard 概览数据
- * 后端接口：GET /backend/dashboard/summary
- * 返回：supplier_count_by_risk / pending_review_count / watchlist / monitor_task_count_by_status
- */
+// ================== Dashboard Summary ==================
 export const getDashboardSummary = async () => {
   try {
     const data = await request.get('/backend/dashboard/summary')
@@ -69,10 +63,6 @@ export const getDashboardSummary = async () => {
 }
 
 // ================== 供应商列表 ==================
-/**
- * 获取供应商列表（优化版：直接返回数据库里的字段，不再逐个请求报告）
- * 后端接口：GET /backend/suppliers
- */
 export const getSupplierRiskList = async (params = {}) => {
   console.log('【API】请求供应商列表...')
   try {
@@ -80,15 +70,13 @@ export const getSupplierRiskList = async (params = {}) => {
     const records = data?.records || data || []
     console.log(`【API】拿到 ${records.length} 家供应商`)
 
-    // ⭐ 简化：直接用数据库里的 current_risk_level 字段
-    // 注意：数据库里的风险等级可能不是最新，后续需要后端做同步
     return records
       .map(item => ({
         supplier_id: item.supplier_id,
         name: item.supplier_name || item.supplier_id,
         importance: item.importance,
         risk_level: item.current_risk_level || 'GREEN',
-        risk_score: item.risk_score || 0,
+        risk_score: item.current_risk_score || item.risk_score || 0,
         risk_trend: { trend_type: item.trend_type || 'STEADY' },
         risk_drive_factors: item.key_factors || []
       }))
@@ -100,26 +88,14 @@ export const getSupplierRiskList = async (params = {}) => {
 }
 
 // ================== 供应商报告列表 ==================
-/**
- * 获取某家供应商的所有报告
- * 后端接口：GET /backend/suppliers/{id}/reports
- */
 export const getSupplierReports = async (supplierId) => {
   const id = normalizeId(supplierId)
   try {
     const data = await request.get(`/backend/suppliers/${id}/reports`)
     return data?.records || data?.reports || data || []
   } catch (error) {
-    console.warn(`【API】${id} 报告列表失败，尝试 /agent/report 兜底`)
-    try {
-      const report = await request.get(`/agent/report/${id}`, {
-        params: { window_unit: 'week', window_size: 12, audience: 'LEADERSHIP' }
-      })
-      return report ? [report] : []
-    } catch (e) {
-      console.error(`【API】${id} 完全失败:`, e)
-      return []
-    }
+    console.warn(`【API】${id} 报告列表失败:`, error)
+    return []
   }
 }
 
@@ -127,7 +103,7 @@ export const getSupplierReports = async (supplierId) => {
 export const getReportDetail = async (reportId) => {
   try {
     const data = await request.get(`/backend/reports/${reportId}`)
-    return data || {}
+    return data?.report || data || {}
   } catch (error) {
     console.error(`【API】报告 ${reportId} 失败:`, error)
     return {}
@@ -138,57 +114,165 @@ export const getReportDetail = async (reportId) => {
 export const getReportVisualization = async (reportId) => {
   try {
     const data = await request.get(`/backend/reports/${reportId}/visualization`)
-    return data || {}
+    return data?.report || data || {}
   } catch (error) {
     console.error(`【API】报告 ${reportId} 可视化失败:`, error)
     return {}
   }
 }
 
-// ================== 单供应商报告（给详情页用） ==================
-/**
- * 获取单供应商的完整报告
- * 优先走新链路，兜底走算法接口
- */
+// ================== 单供应商完整报告（给详情页用） ==================
 export const getAgentRiskOutput = async (supplierId, params = {}) => {
-  // 1. 先尝试走新链路：/backend/suppliers/{id}/reports
+  const id = normalizeId(supplierId)
+  console.log(`【API】开始获取 ${id} 的完整报告`)
+
+  let reports = []
   try {
-    const reports = await getSupplierReports(supplierId)
-    if (reports && reports.length > 0) {
-      const latestReport = reports[0]
-      // 如果拿到的是精简报告，再调 /backend/reports/{id} 拿完整版
-      if (latestReport.report_id && !latestReport.risk_grade) {
-        const fullReport = await getReportDetail(latestReport.report_id)
-        return fullReport
-      }
-      return latestReport
-    }
+    const listData = await request.get(`/backend/suppliers/${id}/reports`)
+    reports = listData?.records || listData?.reports || listData || []
+    console.log(`【API】${id} 报告列表:`, reports)
   } catch (e) {
-    console.warn('【API】新链路失败，降级到 /agent/report')
+    console.warn(`【API】${id} 报告列表失败，降级到 /agent/report`)
+    return await fallbackToAgentReport(id, params)
   }
 
-  // 2. 兜底：走算法接口（用算法样例数据集，能拿到完整的 risk_grade）
+  if (!reports || reports.length === 0) {
+    console.warn(`【API】${id} 无报告，降级到 /agent/report`)
+    return await fallbackToAgentReport(id, params)
+  }
+
+  const latest = reports[0]
+  const reportId = latest.report_id
+
+  let fullReport = {}
+  if (reportId) {
+    try {
+      fullReport = await getReportDetail(reportId)
+      console.log(`【API】${id} 完整报告:`, fullReport)
+    } catch (e) {
+      console.warn(`【API】${id} 完整报告失败`, e)
+    }
+  }
+
+  const hasVisualization = fullReport?.dimension_breakdown && fullReport.dimension_breakdown.length > 0
+  const hasEvidence = fullReport?.evidence_summary && fullReport.evidence_summary.length > 0
+
+  let agentReport = fullReport
+  if (!hasVisualization || !hasEvidence) {
+    try {
+      const fallback = await request.get(`/agent/report/${id}`, {
+        params: { window_unit: 'week', window_size: 12, audience: 'LEADERSHIP', ...params }
+      })
+      agentReport = {
+        ...fallback,
+        ...fullReport,
+        dimension_breakdown: fullReport?.dimension_breakdown?.length ? fullReport.dimension_breakdown : (fallback?.dimension_breakdown || []),
+        evidence_summary: fullReport?.evidence_summary?.length ? fullReport.evidence_summary : (fallback?.evidence_summary || []),
+        risk_trend: fullReport?.risk_trend || fallback?.risk_trend || { trend_type: 'STEADY', trend_desc: '' }
+      }
+    } catch (e) {
+      console.warn(`【API】${id} /agent/report 兜底失败:`, e)
+    }
+  }
+
+  if (!agentReport.risk_grade) {
+    agentReport.risk_grade = {
+      risk_level: latest.risk_level || 'GREEN',
+      score: latest.risk_score || 0,
+      grade_label: latest.risk_level === 'RED' ? '高风险' : latest.risk_level === 'YELLOW' ? '中风险' : '低风险'
+    }
+  }
+  if (!agentReport.supplier_id) agentReport.supplier_id = id
+  if (!agentReport.supplier_name) {
+    agentReport.supplier_name = latest.supplier_name || fullReport?.supplier_name || id
+  }
+
+  console.log(`【API】${id} 最终报告:`, agentReport)
+  return agentReport
+}
+
+// ================== /agent/report 兜底 ==================
+async function fallbackToAgentReport(id, params = {}) {
   try {
-    const data = await request.get(`/agent/report/${supplierId}`, {
+    const data = await request.get(`/agent/report/${id}`, {
       params: { window_unit: 'week', window_size: 12, audience: 'LEADERSHIP', ...params }
     })
-    return data
+    return data || {}
   } catch (error) {
-    console.error(`【API】${supplierId} 失败:`, error)
+    console.error(`【API】${id} /agent/report 兜底失败:`, error)
     return {}
   }
 }
 
-// ================== 处置建议列表 ==================
+// ================== ⭐ 处置建议列表 ==================
+/**
+ * 获取处置建议列表（只返回 RED 供应商）
+ * 
+ * ⭐ 关键修复：用 normalizeId 统一 ID（兼容特殊连字符 U+2011）
+ */
 export const getDisposalList = async () => {
-  const list = await getSupplierRiskList()
-  return list
-    .filter(item => item.risk_level === 'RED')
-    .map((item, index) => ({
-      id: `DISP${String(index + 1).padStart(3, '0')}`,
+  console.log('【API】请求处置列表...')
+
+  // 1. 先拿 dashboard summary
+  const summary = await getDashboardSummary()
+  const byRisk = summary?.supplier_count_by_risk || {}
+  const watchlist = summary?.watchlist || []
+
+  if (!byRisk.RED || byRisk.RED === 0) {
+    console.warn('【API】没有 RED 供应商，处置列表为空')
+    return []
+  }
+
+  // 2. ⭐ 用 normalizeId 构建查询表
+  const latestRiskMap = {}
+  watchlist.forEach(item => {
+    const key = normalizeId(item.supplier_id)
+    latestRiskMap[key] = {
+      risk_level: item.current_risk_level,
+      risk_score: item.current_risk_score
+    }
+  })
+  console.log('【API】最新风险映射:', latestRiskMap)
+
+  // 3. 拿完整供应商列表
+  let records = []
+  try {
+    const data = await request.get('/backend/suppliers')
+    records = data?.records || data || []
+  } catch (e) {
+    console.error('【API】获取供应商列表失败:', e)
+    return []
+  }
+
+  // 4. ⭐ 合并：用 normalizeId 查找最新风险值
+  const enriched = records.map(item => {
+    const key = normalizeId(item.supplier_id)
+    const latest = latestRiskMap[key]
+    return {
       supplier_id: item.supplier_id,
-      supplier_name: item.name,
-      risk_score: item.risk_score,
-      suggest_content: `要求供应商限期完成整改，重点处理：${item.risk_drive_factors?.join('、') || '综合风险'}`
-    }))
+      supplier_name: item.supplier_name || item.supplier_id,
+      importance: item.importance,
+      current_risk_level: latest?.risk_level || item.current_risk_level || 'GREEN',
+      current_risk_score: latest?.risk_score ?? item.current_risk_score ?? 0,
+      key_factors: item.key_factors || []
+    }
+  })
+
+  // 5. 筛选 RED
+  const redList = enriched
+    .filter(item => item.current_risk_level === 'RED')
+    .sort((a, b) => b.current_risk_score - a.current_risk_score)
+
+  console.log(`【API】找到 ${redList.length} 家 RED 供应商`)
+
+  return redList.map((item, index) => ({
+    id: `DISP${String(index + 1).padStart(3, '0')}`,
+    supplier_id: item.supplier_id,
+    supplier_name: item.supplier_name,
+    risk_score: item.current_risk_score,
+    suggest_content: `要求供应商限期完成整改，重点核查风险来源。`,
+    status: '待处置',
+    deadline: '2026-10-31',
+    reviewer: '张经理'
+  }))
 }
