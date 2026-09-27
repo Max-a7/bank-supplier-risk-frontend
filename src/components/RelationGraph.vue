@@ -4,111 +4,132 @@
     <div class="graph-header">
       <span class="graph-title">🔗 供应商-合同-项目-系统 关系图</span>
       <div class="legend">
-        <span v-for="cat in categories" :key="cat.name" class="legend-item">
+        <span v-for="cat in legendCategories" :key="cat.name" class="legend-item">
           <span class="legend-dot" :style="{ background: cat.color }"></span>
           {{ cat.name }}
         </span>
       </div>
     </div>
-    <!-- 注意：BaseChart 在 src/charts/ 下 -->
-    <BaseChart :option="option" height="420px" />
+
+    <!-- 无数据时显示空状态 -->
+    <el-empty v-if="!graphData || !graphData.nodes || graphData.nodes.length === 0" description="暂无关系数据" />
+
+    <!-- 有数据时渲染关系图 -->
+    <BaseChart v-else :option="option" height="420px" />
   </div>
 </template>
 
 <script setup>
 import { computed } from 'vue'
-// BaseChart 在 charts 目录下
 import BaseChart from '@/components/charts/BaseChart.vue'
 
 const props = defineProps({
-  supplierId: {
-    type: String,
-    required: true
+  graphData: {
+    type: Object,
+    default: () => ({ nodes: [], edges: [], categories: [] })
   }
 })
 
-const categories = [
+// 图例（固定 4 类，与后端 categories 顺序一致）
+const legendCategories = [
   { name: '供应商', color: '#409EFF' },
   { name: '合同', color: '#67C23A' },
   { name: '项目', color: '#E6A23C' },
   { name: '系统', color: '#F56C6C' }
 ]
 
-const option = computed(() => ({
-  tooltip: {
-    trigger: 'item',
-    formatter: (params) => {
-      if (params.dataType === 'node') {
-        const categoryName = categories[params.data.category]?.name || '未知'
-        return `<strong>${params.name}</strong><br/>类型: ${categoryName}`
-      }
-      return `<strong>${params.data.source}</strong> → <strong>${params.data.target}</strong>`
-    }
-  },
-  series: [
-    {
-      type: 'graph',
-      layout: 'force',
-      roam: true,
-      draggable: true,
-      label: {
-        show: true,
-        position: 'bottom',
-        fontSize: 12,
-        color: '#333',
-        fontWeight: 500
-      },
-      edgeLabel: {
-        show: false
-      },
-      emphasis: {
-        focus: 'adjacency',
-        lineStyle: {
-          width: 3
+// 节点颜色映射（按 category 索引）
+const categoryColors = ['#409EFF', '#67C23A', '#E6A23C', '#F56C6C']
+const categoryNames = ['供应商', '合同', '项目', '系统']
+
+// 节点大小：供应商最大，其他略小
+const getSymbolSize = (type) => {
+  const map = { 'SUPPLIER': 60, 'CONTRACT': 42, 'PROJECT': 42, 'SYSTEM': 38 }
+  return map[type] || 38
+}
+
+// 真实数据 → ECharts option
+const option = computed(() => {
+  const nodes = props.graphData?.nodes || []
+  const edges = props.graphData?.edges || []
+
+  // 1. 转换节点
+  const data = nodes.map(node => ({
+    id: node.id,
+    name: node.label || node.id,
+    category: node.category ?? 0,
+    symbolSize: getSymbolSize(node.type),
+    itemStyle: { color: categoryColors[node.category] || '#409EFF' },
+    attributes: node.attributes || {}
+  }))
+
+  // 2. 转换边
+  const links = edges.map(edge => ({
+    source: edge.source,
+    target: edge.target,
+    relationship: edge.relationship
+  }))
+
+  return {
+    tooltip: {
+      trigger: 'item',
+      formatter: (params) => {
+        if (params.dataType === 'node') {
+          const catName = categoryNames[params.data.category] || '未知'
+          let html = `<strong>${params.name}</strong><br/>类型: ${catName}`
+          // 显示 attributes
+          const attrs = params.data.attributes
+          if (attrs && Object.keys(attrs).length > 0) {
+            html += '<br/>'
+            Object.entries(attrs).forEach(([k, v]) => {
+              html += `${k}: ${v}<br/>`
+            })
+          }
+          return html
         }
-      },
-      data: [
-        { name: 'XX科技', category: 0, symbolSize: 55, itemStyle: { color: '#409EFF' } },
-        { name: '合同C001', category: 1, symbolSize: 38, itemStyle: { color: '#67C23A' } },
-        { name: '合同C003', category: 1, symbolSize: 38, itemStyle: { color: '#67C23A' } },
-        { name: '合同C005', category: 1, symbolSize: 38, itemStyle: { color: '#67C23A' } },
-        { name: '网银重构项目', category: 2, symbolSize: 42, itemStyle: { color: '#E6A23C' } },
-        { name: '核心支付系统', category: 3, symbolSize: 42, itemStyle: { color: '#F56C6C' } },
-        { name: '手机银行', category: 3, symbolSize: 35, itemStyle: { color: '#F56C6C' } },
-        { name: '项目PRJ01', category: 2, symbolSize: 38, itemStyle: { color: '#E6A23C' } },
-        { name: '数据中台', category: 3, symbolSize: 35, itemStyle: { color: '#F56C6C' } }
-      ],
-      links: [
-        { source: 'XX科技', target: '合同C001' },
-        { source: 'XX科技', target: '合同C003' },
-        { source: 'XX科技', target: '合同C005' },
-        { source: '合同C001', target: '网银重构项目' },
-        { source: '合同C001', target: '核心支付系统' },
-        { source: '合同C003', target: '手机银行' },
-        { source: '合同C003', target: '项目PRJ01' },
-        { source: '合同C005', target: '数据中台' },
-        { source: '核心支付系统', target: '项目PRJ01' }
-      ],
-      categories: categories.map(c => ({ 
-        name: c.name,
-        itemStyle: { color: c.color }
-      })),
-      force: {
-        repulsion: 350,
-        edgeLength: [100, 180],
-        layoutAnimation: true,
-        gravity: 0.1
-      },
-      lineStyle: {
-        color: '#ccc',
-        width: 2,
-        curveness: 0.2
-      },
-      edgeSymbol: ['none', 'arrow'],
-      edgeSymbolSize: [0, 8]
-    }
-  ]
-}))
+        return `${params.data.source} → ${params.data.target}`
+      }
+    },
+    series: [
+      {
+        type: 'graph',
+        layout: 'force',
+        roam: true,
+        draggable: true,
+        label: {
+          show: true,
+          position: 'bottom',
+          fontSize: 12,
+          color: '#333',
+          fontWeight: 500
+        },
+        emphasis: {
+          focus: 'adjacency',
+          lineStyle: { width: 3 }
+        },
+        data,
+        links,
+        categories: legendCategories.map(c => ({
+          name: c.name,
+          itemStyle: { color: c.color }
+        })),
+        force: {
+          repulsion: 350,
+          edgeLength: [100, 180],
+          layoutAnimation: true,
+          gravity: 0.1
+        },
+        lineStyle: {
+          color: '#ccc',
+          width: 2,
+          curveness: 0.2
+        },
+        edgeSymbol: ['none', 'arrow'],
+        edgeSymbolSize: [0, 8]
+      }
+    ]
+  }
+})
 </script>
 
 <style scoped>

@@ -7,6 +7,7 @@ const request = axios.create({
   timeout: 30000
 })
 
+// ⭐ 请求拦截器：携带 X-User-Id
 request.interceptors.request.use(
   (config) => {
     const userId = localStorage.getItem('X-User-Id')
@@ -18,6 +19,7 @@ request.interceptors.request.use(
   (error) => Promise.reject(error)
 )
 
+// 响应拦截器
 request.interceptors.response.use(
   (response) => {
     const res = response.data
@@ -30,11 +32,12 @@ request.interceptors.response.use(
   (error) => Promise.reject(error)
 )
 
-// ⭐ ID 归一化：把特殊连字符 U+2011 等转成普通 -
+// ID 归一化：兼容特殊连字符 U+2011 等
 const normalizeId = (str) => String(str || '').replace(/[\u2010-\u2015\u2212]/g, '-')
 
 // ================== Mock 登录 ==================
-export const mockLogin = async (username = 'demo_leadership') => {
+// ⭐ 默认账号改为 demo_admin
+export const mockLogin = async (username = 'demo_admin') => {
   try {
     const res = await request.post('/backend/mock/login', { username })
     const xUserId = res?.request_headers?.['X-User-Id'] || res?.profile?.user?.user_id
@@ -45,7 +48,7 @@ export const mockLogin = async (username = 'demo_leadership') => {
     return res
   } catch (e) {
     console.warn('【API】Mock 登录失败，使用默认 X-User-Id')
-    localStorage.setItem('X-User-Id', 'demo-leadership')
+    localStorage.setItem('X-User-Id', 'demo-admin')
     return null
   }
 }
@@ -204,16 +207,10 @@ async function fallbackToAgentReport(id, params = {}) {
   }
 }
 
-// ================== ⭐ 处置建议列表 ==================
-/**
- * 获取处置建议列表（只返回 RED 供应商）
- * 
- * ⭐ 关键修复：用 normalizeId 统一 ID（兼容特殊连字符 U+2011）
- */
+// ================== 处置建议列表 ==================
 export const getDisposalList = async () => {
   console.log('【API】请求处置列表...')
 
-  // 1. 先拿 dashboard summary
   const summary = await getDashboardSummary()
   const byRisk = summary?.supplier_count_by_risk || {}
   const watchlist = summary?.watchlist || []
@@ -223,7 +220,6 @@ export const getDisposalList = async () => {
     return []
   }
 
-  // 2. ⭐ 用 normalizeId 构建查询表
   const latestRiskMap = {}
   watchlist.forEach(item => {
     const key = normalizeId(item.supplier_id)
@@ -232,9 +228,7 @@ export const getDisposalList = async () => {
       risk_score: item.current_risk_score
     }
   })
-  console.log('【API】最新风险映射:', latestRiskMap)
 
-  // 3. 拿完整供应商列表
   let records = []
   try {
     const data = await request.get('/backend/suppliers')
@@ -244,7 +238,6 @@ export const getDisposalList = async () => {
     return []
   }
 
-  // 4. ⭐ 合并：用 normalizeId 查找最新风险值
   const enriched = records.map(item => {
     const key = normalizeId(item.supplier_id)
     const latest = latestRiskMap[key]
@@ -258,7 +251,6 @@ export const getDisposalList = async () => {
     }
   })
 
-  // 5. 筛选 RED
   const redList = enriched
     .filter(item => item.current_risk_level === 'RED')
     .sort((a, b) => b.current_risk_score - a.current_risk_score)
@@ -275,4 +267,36 @@ export const getDisposalList = async () => {
     deadline: '2026-10-31',
     reviewer: '张经理'
   }))
+}
+// ================== ⭐ Agent 研判过程 ==================
+/**
+ * 获取 Agent 研判过程
+ * 后端接口：GET /backend/reports/{report_id}/agent-trace
+ */
+export const getAgentTrace = async (reportId) => {
+  try {
+    const data = await request.get(`/backend/reports/${reportId}/agent-trace`)
+    console.log(`【API】报告 ${reportId} 的 Agent 研判:`, data)
+    return data || {}
+  } catch (error) {
+    console.error(`【API】Agent 研判 ${reportId} 失败:`, error)
+    return {}
+  }
+}
+
+// ================== ⭐ 供应商关联项目 ==================
+/**
+ * 获取供应商关联项目 + 关系图
+ * 后端接口：GET /backend/suppliers/{supplier_id}/projects
+ */
+export const getSupplierProjects = async (supplierId) => {
+  const id = normalizeId(supplierId)
+  try {
+    const data = await request.get(`/backend/suppliers/${id}/projects`)
+    console.log(`【API】${id} 关联数据:`, data)
+    return data || {}
+  } catch (error) {
+    console.error(`【API】${id} 关联数据失败:`, error)
+    return { data_status: 'NO_DATA' }
+  }
 }

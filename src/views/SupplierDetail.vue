@@ -1,5 +1,4 @@
 <!-- src/views/SupplierDetail.vue -->
-<!-- src/views/SupplierDetail.vue -->
 <template>
   <div class="supplier-detail">
     <!-- 时间轴演示控制 -->
@@ -85,28 +84,30 @@
     <!-- 关系图 -->
     <div class="project-section">
       <div class="project-cards-wrapper">
+        <!-- 左侧：关联项目卡片 -->
         <el-card class="project-cards" shadow="hover">
           <template #header>
-            <span><strong>关联项目（{{ supplierProjects.length }}个）</strong></span>
+            <span><strong>关联项目（{{ projects.length }}个）</strong></span>
           </template>
           <div class="project-list">
-            <div v-for="project in supplierProjects" :key="project.id" class="project-item">
+            <div v-for="project in projects" :key="project.project_id" class="project-item">
               <div class="project-info">
-                <span class="project-name">{{ project.name }}</span>
-                <el-tag :type="getProjectStatusType(project.status)" size="small">
-                  {{ project.status }}
+                <span class="project-name">{{ project.project_name }}</span>
+                <el-tag :type="getProjectStatusType(project.project_stage)" size="small">
+                  {{ project.project_stage }}
                 </el-tag>
               </div>
               <div class="project-meta">
-                <span>合同金额：{{ project.amount }}</span>
-                <span>开始日期：{{ project.startDate }}</span>
+                <span>合同ID：{{ project.contract_id || '--' }}</span>
               </div>
             </div>
+            <el-empty v-if="projects.length === 0" description="暂无关联项目" />
           </div>
         </el-card>
 
+        <!-- 右侧：关系图（真实数据） -->
         <div class="relation-graph-wrapper">
-          <RelationGraph :supplier-id="supplierId" />
+          <RelationGraph :graph-data="graphData" />
         </div>
       </div>
     </div>
@@ -119,16 +120,18 @@ import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import RelationGraph from '@/components/RelationGraph.vue'
 import BaseChart from '@/components/charts/BaseChart.vue'
-import { getAgentRiskOutput } from '@/api/risk.js'
+import { getAgentRiskOutput, getSupplierProjects } from '@/api/risk.js'
 
 const route = useRoute()
-const supplierId = ref(route.params.id || 'S-REC198')
+const supplierId = ref(route.params.id || 'S-ACC134')
 
 // ================= 核心数据 =================
 const report = ref({})
-const supplierName = ref('加载中...')  // 独立的供应商名称状态
+const supplierName = ref('加载中...')
+const projects = ref([])
+const graphData = ref({ nodes: [], edges: [], categories: [] })
 
-// 时序数据：从 evidence_summary 动态生成
+// 时序数据
 const history = computed(() => {
   const items = report.value?.evidence_summary || []
   if (items.length === 0) return []
@@ -144,7 +147,7 @@ const history = computed(() => {
 // 供应商基本信息
 const supplierInfo = computed(() => ({
   name: supplierName.value,
-  code: report.value?.supplier_id || report.value?.supplier_profile?.supplier_id || '--',
+  code: report.value?.supplier_id || '--',
   contact: '张经理',
   phone: '138****1234',
   status: '合作中'
@@ -169,9 +172,9 @@ const getRiskTagType = (level) => {
   return map[level] || 'info'
 }
 
-const getProjectStatusType = (status) => {
-  const map = { '进行中': 'warning', '已完成': 'success', '已暂停': 'danger', '待启动': 'info' }
-  return map[status] || 'info'
+const getProjectStatusType = (stage) => {
+  const map = { '开发中': 'warning', '上线运维': 'success', '待启动': 'info' }
+  return map[stage] || 'info'
 }
 
 const playRiskEvolution = () => {
@@ -209,7 +212,7 @@ const radarOption = computed(() => {
   return {
     tooltip: { trigger: 'item' },
     radar: {
-      indicator: dimensions.map(dim => ({ name: dim, max: 3 })),
+      indicator: dimensions.map(dim => ({ name: dim, max: 4 })),
       shape: 'polygon',
       splitNumber: 4,
       axisName: { color: '#333', fontSize: 12 },
@@ -233,22 +236,21 @@ const radarOption = computed(() => {
   }
 })
 
-// ================= 关联项目（静态） =================
-const supplierProjects = ref([
-  { id: 1, name: '网银重构项目', status: '进行中', amount: '¥1,200,000', startDate: '2024-01-15' },
-  { id: 2, name: '核心支付系统升级', status: '已完成', amount: '¥2,800,000', startDate: '2023-06-01' },
-  { id: 3, name: '手机银行开发', status: '进行中', amount: '¥950,000', startDate: '2024-03-20' },
-  { id: 4, name: '数据中台建设项目', status: '待启动', amount: '¥3,500,000', startDate: '2025-01-01' }
-])
-
 // ================= 生命周期 =================
 const fetchDetail = async () => {
-  console.log('【前端】开始 fetchDetail:', supplierId.value)
+  console.log('【SupplierDetail】开始加载:', supplierId.value)
+
+  // 1. 拿风险报告
   const data = await getAgentRiskOutput(supplierId.value)
   report.value = data || {}
   supplierName.value = data?.supplier_name || data?.supplier_profile?.supplier_name || supplierId.value
-  console.log('【前端】最终供应商名称:', supplierName.value)
   timeIndex.value = 0
+
+  // 2. 拿关联项目 + 关系图
+  const projData = await getSupplierProjects(supplierId.value)
+  projects.value = projData?.projects || []
+  graphData.value = projData?.graph || { nodes: [], edges: [], categories: [] }
+  console.log('【SupplierDetail】关联项目:', projects.value.length, '关系图节点:', graphData.value.nodes?.length)
 }
 
 onMounted(() => {
